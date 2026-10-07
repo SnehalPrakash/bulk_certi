@@ -17,8 +17,11 @@ const state = {
   recipientNames: [],
   isDragging: false,
   isGenerating: false,
-  lastGeneratedBlob: null
+  lastGeneratedBlob: null,
+  isBackendOnline: false
 };
+
+const API_BASE = 'http://127.0.0.1:8000/api/v1';
 
 // ============================================================================
 // DOM Element References
@@ -31,6 +34,7 @@ const elements = {
   previewDim: document.getElementById('preview-dim'),
   btnChangeTemplate: document.getElementById('btn-change-template'),
 
+  eventTitleInput: document.getElementById('event-title-input'),
   fontSelect: document.getElementById('font-family-select'),
   customFontInput: document.getElementById('custom-font-input'),
   fontSizeSlider: document.getElementById('font-size-slider'),
@@ -42,6 +46,7 @@ const elements = {
   namesCount: document.getElementById('names-count'),
   btnSampleNames: document.getElementById('btn-sample-names'),
 
+  engineModeSelect: document.getElementById('engine-mode-select'),
   btnGenerate: document.getElementById('btn-generate'),
   btnGenerateLabel: document.getElementById('btn-generate-label'),
   progressWrap: document.getElementById('progress-wrap'),
@@ -51,6 +56,7 @@ const elements = {
   downloadBanner: document.getElementById('download-banner'),
   downloadCountText: document.getElementById('download-count-text'),
   btnDownloadAgain: document.getElementById('btn-download-again'),
+  backendStatusBadge: document.getElementById('backend-status-badge'),
 
   coordsDisplay: document.getElementById('coords-display'),
   stageViewport: document.getElementById('stage-viewport'),
@@ -78,7 +84,7 @@ const SAMPLE_NAMES = [
 ];
 
 // ============================================================================
-// Initialization & Event Listeners
+// Initialization & Backend Health Check
 // ============================================================================
 function init() {
   setupTemplateUpload();
@@ -90,6 +96,32 @@ function init() {
 
   // Load America font eagerly
   document.fonts.load(`56px 'America'`).catch(() => {});
+
+  // Initial and periodic backend status check
+  checkBackendHealth();
+  setInterval(checkBackendHealth, 8000);
+}
+
+async function checkBackendHealth() {
+  try {
+    const res = await fetch('http://127.0.0.1:8000/health');
+    if (res.ok) {
+      state.isBackendOnline = true;
+      if (elements.backendStatusBadge) {
+        elements.backendStatusBadge.innerHTML = '<span class="pulse-dot"></span> 🟢 FastAPI Backend (Port 8000)';
+        elements.backendStatusBadge.style.color = '#10b981';
+        elements.backendStatusBadge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+      }
+      return;
+    }
+  } catch (_) {}
+  
+  state.isBackendOnline = false;
+  if (elements.backendStatusBadge) {
+    elements.backendStatusBadge.innerHTML = '<span class="pulse-dot" style="background:#f59e0b;box-shadow:0 0 8px #f59e0b;"></span> ⚡ Client Engine Active';
+    elements.backendStatusBadge.style.color = '#f59e0b';
+    elements.backendStatusBadge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+  }
 }
 
 // ============================================================================
@@ -255,7 +287,6 @@ function getCanvasTextAlign(align) {
   return 'center';
 }
 
-
 // ============================================================================
 // Step 3: Recipient Names Input
 // ============================================================================
@@ -283,7 +314,7 @@ function setupNamesInput() {
 // Interactive Drag & Click Placement Engine
 // ============================================================================
 function setupDragInteraction() {
-  const { canvasContainer, draggableMarker, stageCanvas } = elements;
+  const { canvasContainer, draggableMarker } = elements;
 
   // Click on canvas to instantly position marker
   canvasContainer.addEventListener('pointerdown', (e) => {
@@ -401,18 +432,13 @@ function renderPreview() {
 }
 
 // ============================================================================
-// Step 4: Batch Certificate Generation & Export
+// Step 4: Batch Certificate Generation & Export (FastAPI + Browser Fallback)
 // ============================================================================
 function setupBatchGeneration() {
-  const { btnGenerate, btnGenerateLabel, progressWrap, progressStatus, progressPercent, progressBar, downloadBanner, downloadCountText, btnDownloadAgain } = elements;
+  const { btnGenerate, btnGenerateLabel, progressWrap, progressStatus, progressPercent, progressBar, downloadBanner, downloadCountText, btnDownloadAgain, engineModeSelect, eventTitleInput } = elements;
 
   btnGenerate.addEventListener('click', async () => {
     if (state.isGenerating) return;
-
-    if (!state.templateImage) {
-      alert("Please upload a certificate template first.");
-      return;
-    }
 
     if (!state.recipientNames || state.recipientNames.length === 0) {
       alert("Please enter at least one recipient name.");
@@ -427,10 +453,87 @@ function setupBatchGeneration() {
     progressWrap.classList.remove('visually-hidden');
     downloadBanner.classList.add('visually-hidden');
 
+    const selectedEngine = engineModeSelect ? engineModeSelect.value : 'auto';
+    const shouldTryBackend = selectedEngine === 'backend' || (selectedEngine === 'auto' && state.isBackendOnline);
+
+    // ─────────────────────────────────────────────────────────────
+    // FASTAPI BACKEND MODE
+    // ─────────────────────────────────────────────────────────────
+    if (shouldTryBackend) {
+      try {
+        const eventName = eventTitleInput?.value?.trim() || "Certificate of Achievement";
+        const payload = {
+          event_name: eventName,
+          issue_date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+          recipients: state.recipientNames.map(name => ({ name }))
+        };
+
+        progressStatus.textContent = "Dispatching job to FastAPI backend...";
+        const createRes = await fetch(`${API_BASE}/jobs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!createRes.ok) {
+          throw new Error(`API returned HTTP ${createRes.status}`);
+        }
+
+        const jobData = await createRes.json();
+        const jobId = jobData.id;
+
+        // Poll job status until completed
+        while (true) {
+          await new Promise(r => setTimeout(r, 400));
+          const pollRes = await fetch(`${API_BASE}/jobs/${jobId}`);
+          if (pollRes.ok) {
+            const statusData = await pollRes.json();
+            const percent = Math.round(statusData.progress_percentage || 0);
+            progressBar.style.width = `${percent}%`;
+            progressPercent.textContent = `${percent}%`;
+            progressStatus.textContent = `FastAPI Worker: ${statusData.success_count} / ${statusData.total_count} processed`;
+
+            if (statusData.status === 'COMPLETED' || statusData.status === 'FAILED') {
+              break;
+            }
+          }
+        }
+
+        // Download ZIP from backend
+        progressStatus.textContent = "Streaming ZIP package from backend...";
+        const zipRes = await fetch(`${API_BASE}/jobs/${jobId}/download`);
+        if (!zipRes.ok) throw new Error("Failed to download backend ZIP file");
+
+        const zipBlob = await zipRes.blob();
+        state.lastGeneratedBlob = zipBlob;
+        triggerDownload(zipBlob, `${eventName.replace(/[^a-zA-Z0-9_\-]/g, '_')}_certificates.zip`);
+
+        finishGeneration(`${state.recipientNames.length} certificates generated via FastAPI`);
+        return;
+
+      } catch (err) {
+        console.warn("Backend processing error, falling back to client-side engine:", err);
+        if (selectedEngine === 'backend') {
+          alert(`Backend error: ${err.message}. Please ensure the FastAPI server is running on port 8000.`);
+          resetGenerateButton();
+          return;
+        }
+        progressStatus.textContent = "FastAPI unavailable, switching to browser engine...";
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // CLIENT-SIDE BROWSER ENGINE FALLBACK
+    // ─────────────────────────────────────────────────────────────
+    if (!state.templateImage) {
+      alert("Please upload a certificate template or click 'Generate Sample Template'.");
+      resetGenerateButton();
+      return;
+    }
+
     const total = state.recipientNames.length;
     const zip = new JSZip();
 
-    // Offscreen high-resolution rendering canvas
     const offscreen = document.createElement('canvas');
     offscreen.width = state.templateWidth;
     offscreen.height = state.templateHeight;
@@ -442,11 +545,9 @@ function setupBatchGeneration() {
     for (let i = 0; i < total; i++) {
       const name = state.recipientNames[i];
 
-      // Draw base template
       offCtx.clearRect(0, 0, state.templateWidth, state.templateHeight);
       offCtx.drawImage(state.templateImage, 0, 0, state.templateWidth, state.templateHeight);
 
-      // Draw recipient text
       offCtx.save();
       offCtx.font = `${state.fontSize}px ${state.fontFamily}`;
       offCtx.fillStyle = state.textColor;
@@ -455,18 +556,15 @@ function setupBatchGeneration() {
       offCtx.fillText(name, posX, posY);
       offCtx.restore();
 
-      // Convert to blob and add to ZIP
       const blob = await new Promise((resolve) => offscreen.toBlob(resolve, 'image/png'));
       const safeName = sanitizeFilename(name, i);
       zip.file(`${safeName}.png`, blob);
 
-      // Update progress
       const percent = Math.round(((i + 1) / total) * 100);
       progressStatus.textContent = `Generated ${i + 1} of ${total}: ${name}`;
       progressPercent.textContent = `${percent}%`;
       progressBar.style.width = `${percent}%`;
 
-      // Allow UI thread to breathe
       if (i % 5 === 0) {
         await new Promise((r) => setTimeout(r, 0));
       }
@@ -479,25 +577,23 @@ function setupBatchGeneration() {
 
     state.lastGeneratedBlob = zipBlob;
     triggerDownload(zipBlob, 'certificates.zip');
+    finishGeneration(`${total} certificates bundled via Browser Engine`);
+  });
 
-    // Confetti celebration
-    confetti({
-      particleCount: 80,
-      spread: 70,
-      origin: { y: 0.6 }
-    });
-
-    // Update UI state
+  function resetGenerateButton() {
     state.isGenerating = false;
     btnGenerate.disabled = false;
     btnGenerateLabel.textContent = "Generate Certificates (ZIP)";
     progressWrap.classList.add('visually-hidden');
+  }
 
+  function finishGeneration(countText) {
+    confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+    resetGenerateButton();
     downloadBanner.classList.remove('visually-hidden');
-    downloadCountText.textContent = `${total} certificate${total === 1 ? '' : 's'} bundled in ZIP`;
-
+    downloadCountText.textContent = countText;
     animate(downloadBanner, { scale: [0.95, 1], opacity: [0, 1] }, { type: "spring", bounce: 0.3 });
-  });
+  }
 
   btnDownloadAgain.addEventListener('click', () => {
     if (state.lastGeneratedBlob) {
