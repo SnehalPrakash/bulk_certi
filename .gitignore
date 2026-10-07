@@ -16,6 +16,8 @@ dist/
 
 # Generated certificates & temporary uploads
 certificates/
+output_certificates/
+test_storage/
 *.zip
 *.db
 *.sqlite3
