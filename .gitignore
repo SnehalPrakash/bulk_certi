@@ -1,4 +1,27 @@
+# Virtual environments
 venv/
-main/backend/__pycache__/
-main/certificator/__pycache__/
+.venv/
 env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Node & Build artifacts
+node_modules/
+dist/
+.vite/
+
+# Generated certificates & temporary uploads
+certificates/
+*.zip
+*.db
+*.sqlite3
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/
+.cursor/

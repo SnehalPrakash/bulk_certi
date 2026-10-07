@@ -1,0 +1,19 @@
+{
+  "name": "bulk_certificate_generator",
+  "version": "1.0.0",
+  "description": "High-performance bulk certificate generator with Motion animation and client-side batch rendering.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "canvas-confetti": "^1.9.4",
+    "jszip": "^3.10.1",
+    "motion": "^14.0.0"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0"
+  }
+}
