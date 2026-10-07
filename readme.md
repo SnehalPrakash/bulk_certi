@@ -90,6 +90,14 @@ FastAPI automatically generates interactive OpenAPI documentation:
 - **Swagger UI**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - **ReDoc**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
 
+### Running the Motion Web UI (Bonus Interactive Client)
+An interactive client-side web application built with **Motion** and **HTML5 Canvas** is included for real-time visual positioning, live previews, and full-stack testing:
+```bash
+npm install
+npm run dev
+```
+The UI will be live at **http://localhost:5173**. It automatically detects and dispatches bulk jobs to your FastAPI backend on port 8000!
+
 ---
 
 ## 🧪 Running Automated Tests
